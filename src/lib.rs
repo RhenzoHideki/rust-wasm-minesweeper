@@ -3,6 +3,8 @@ use std::collections::HashSet;
 use rand::{thread_rng, Rng};
 
 type Position = (usize, usize);
+
+#[derive(Debug)]
 struct Minesweeper{
     // Maybe change width and height for a L x L type , instead of using 2 variables 
     width: usize,
@@ -20,7 +22,7 @@ impl Minesweeper {
             height,
             open_field: HashSet::new(), 
             mines: Self::generate_mines(width,height,mine_count),
-            flags, 
+            flags: HashSet::new(), 
         }
     }
 
@@ -41,6 +43,13 @@ impl Minesweeper {
     }
 }
 
-fn main() {
-    println!("Hello, world!");
+#[cfg(test)]
+mod tests {
+    use crate::Minesweeper;
+    
+    #[test]
+    fn test(){
+        let ms = Minesweeper::new(10,10,2);
+        println!("{:?}",ms);
+    }
 }
