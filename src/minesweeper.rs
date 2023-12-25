@@ -1,6 +1,8 @@
 use std::{collections::HashSet, iter::FlatMap, fmt::{Write, write, Display}};
-
+ 
+#[cfg(not(target_family = "wasm"))]
 use rand::{thread_rng, Rng};
+use wasm_bindgen::prelude::*;
 
 pub type Position = (usize, usize);
 
@@ -19,6 +21,7 @@ pub struct Minesweeper{
     mines: HashSet<Position>,
     flags: HashSet<Position>,
 
+    lost: bool,
 }
 
 impl Display for Minesweeper{
@@ -27,7 +30,9 @@ impl Display for Minesweeper{
             for x in 0..self.width{
                 let pos = (x,y);
                 if !self.open_field.contains(&pos){
-                    if self.flags.contains(&pos){
+                    if self.lost && self.mines.contains(&pos){
+                        f.write_str("💣 ")?;
+                    }else if self.flags.contains(&pos){
                         f.write_str("🚩 ")?;
                     }else{
                         f.write_str("🟪 ")?;
@@ -35,7 +40,14 @@ impl Display for Minesweeper{
                 }else if self.mines.contains(&pos) {
                     f.write_str("💣 ")?;
                 } else {
-                    write!(f," {} ", self.neighboring_mines(pos))?;
+                    let mine_count = self.neighboring_mines(pos);
+                    if mine_count > 0 {
+                        write!(f," {} ", mine_count)?;
+                    }else{
+                        f.write_str("⬜ ")?;
+                    }
+
+                    
                 }
             }
             f.write_char('\n')?;
@@ -44,6 +56,25 @@ impl Display for Minesweeper{
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
+pub fn random_range(min: usize, max: usize) -> usize {
+  let mut rng = thread_rng();
+
+  rng.gen_range(min..max)
+}
+
+#[wasm_bindgen]
+extern "C" {
+#[wasm_bindgen(js_namespace = Math)]
+fn random() -> f64;
+}   
+
+#[cfg(target_family = "wasm")]
+pub fn random_range(min: usize, max: usize) -> usize {
+  (random() * (max - min) as f64).floor() as usize + min
+}
+
+
 impl Minesweeper {
     pub fn new(width: usize , height: usize, mine_count: usize) -> Minesweeper{
         Minesweeper {
@@ -51,19 +82,19 @@ impl Minesweeper {
             height,
             open_field: HashSet::new(), 
             mines: Self::generate_mines(width,height,mine_count),
-            flags: HashSet::new(), 
+            flags: HashSet::new(),
+            lost: false,
         }
     }
 
     fn generate_mines(width: usize , height: usize, mine_count: usize) -> HashSet<Position>{
         let mut mines = HashSet::new();
 
-        let mut rng = thread_rng();
         
         while mines.len() < mine_count {
 
-            let x = rng.gen_range(0..width);
-            let y = rng.gen_range(0..height);
+            let x = random_range(0, width);
+            let y = random_range(0, height);
 
             mines.insert((x,y));
         }
@@ -71,10 +102,11 @@ impl Minesweeper {
 
     }
 
+
     pub fn iter_neighbors(&self, (x,y): Position) -> impl Iterator<Item = Position>{
         let width = self.width;
         let height = self.height;
-        (x.min(1) - 1 ..= (y + 1).min(width- 1))
+        (x.max(1) - 1 ..= (x + 1).min(width- 1))
         .flat_map(move |i|{
             (y.min(1)-1..=(y+1).min(height - 1)).map(move |j| (i , j))
         })
@@ -89,7 +121,20 @@ impl Minesweeper {
     }
 
     pub fn open(&mut self , position: Position) -> Option<OpenResult> {
-        if self.flags.contains(&position) {
+        if self.open_field.contains(&position) {
+            let mine_count = self.neighboring_mines(position);
+            let flag_count = self.iter_neighbors(position).filter(| neighbor| self.flags.contains(neighbor)).count() as u8;
+            
+            if mine_count == flag_count {
+               for neighbor in self.iter_neighbors(position){
+                if !self.flags.contains(&neighbor){
+                    self.open(neighbor);
+                }
+               } 
+            }
+        }
+
+        if self.lost ||  self.flags.contains(&position) {
             return None  ;
         }
         self.open_field.insert(position);
@@ -97,9 +142,20 @@ impl Minesweeper {
         let is_mine = self.mines.contains(&position);
 
         if is_mine{
+            self.lost = true;
             Some(OpenResult::Mine)
         } else {
-            Some(OpenResult::NoMine(self.neighboring_mines(position)))
+            let mine_count = self.neighboring_mines(position);
+
+            if mine_count == 0{
+        
+                for neighbor in self.iter_neighbors(position){
+                    if !self.open_field.contains(&neighbor){
+                        self.open(neighbor);
+                    }
+                }
+            }
+            Some(OpenResult::NoMine(mine_count))
         }
         
     }
